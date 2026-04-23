@@ -1,0 +1,151 @@
+Contexto do Projeto
+
+Desenvolver um dashboard interativo com foco em análise de dados imobiliários no Brasil, com o objetivo principal de responder à seguinte pergunta:
+
+Vale a pena comprar imóveis residenciais no Brasil como investimento?
+
+O dashboard deve permitir análise temporal, comparações entre cidades e bairros, além de considerar tanto valores nominais quanto valores ajustados pela inflação, possibilitando uma leitura real da valorização dos imóveis.
+
+Objetivo do Dashboard
+
+O sistema deve permitir:
+
+Comparar e analisar índices imobiliários ao longo do tempo
+Visualizar o preço de imóveis por cidade
+Visualizar o preço de imóveis por bairro dentro de cada cidade
+Analisar a evolução dos preços nominais
+Analisar a evolução dos preços ajustados pela inflação
+Comparar diferentes cidades e bairros
+Identificar crescimento real vs crescimento inflacionário
+Fontes de Dados
+APIs (Banco Central do Brasil - SGS)
+
+Consumir os seguintes dados via API:
+
+IPCA
+IVG-R
+MVG-R
+Arquivos locais (diretório "dados")
+
+Os dados abaixo devem ser carregados a partir de arquivos Excel:
+
+IMGI-R (ABECIP)
+Índice FipZap e preço por m² (venda e locação)
+Preço por m² por bairro
+Requisitos Técnicos
+Tecnologia
+Linguagem principal: Python
+Framework inicial sugerido: Streamlit
+
+Observação:
+Caso exista um framework mais moderno, mais bonito ou mais adequado para visualização e experiência do usuário, ele pode ser utilizado no lugar do Streamlit.
+
+Diretrizes de Layout e Design
+Interface deve ser clean e elegante
+Não deve ser poluída visualmente
+Evitar excesso de botões
+Utilizar tabs para organizar o conteúdo
+Paleta de cores:
+Cor principal: navy blue
+Componentes visuais devem ser:
+Simples
+Diretos
+Elegantes
+Bem alinhados
+Estrutura do Dashboard
+Tab 1: Panorama
+
+Objetivo: fornecer uma visão geral da evolução dos preços imobiliários.
+
+Funcionalidades
+Exibir:
+Preço médio do m² por cidade
+Preço do m² ajustado pela inflação ao longo do tempo
+Gráfico principal:
+Deve ocupar largura ampla (wide)
+Deve permitir comparação entre cidades
+Deve permitir alternar entre:
+Base 100
+Valor real
+KPIs (posicionados ao lado direito do gráfico):
+Devem ser compactos
+Devem ser diretos
+Devem ser elegantes
+KPIs devem incluir:
+Cidades que mais cresceram
+Variação nominal
+Variação real (ajustada pela inflação)
+Tab 2: Comparações
+
+Objetivo: permitir comparações diretas entre índices.
+
+Funcionalidades
+Comparar índice FipeZap por cidade
+Gráfico principal com comparação entre cidades
+Gráfico secundário (abaixo do principal):
+Comparação entre:
+Índices selecionados
+Inflação (IPCA)
+Tab 3: m² por Bairro
+
+Objetivo: análise detalhada por localização.
+
+Funcionalidades
+Permitir seleção de:
+Cidades
+Bairros dentro dessas cidades
+Permitir:
+Comparar múltiplos bairros
+Comparar bairros de diferentes cidades
+Gráficos:
+Gráfico 1:
+Preço nominal por m²
+Gráfico 2 (separado para evitar poluição visual):
+Preço ajustado pela inflação
+Ambos os gráficos devem incluir:
+Linha da inflação como referência
+Tab 4: Dados
+
+Objetivo: permitir acesso e transparência dos dados utilizados.
+
+Funcionalidades
+Exibir preview dos dados
+Permitir download dos dados nos formatos:
+Excel (.xlsx)
+CSV (.csv)
+Especificações de Interface
+Botões
+Devem ser:
+Simples
+Elegantes
+Sem excesso de destaque
+Filtros
+Devem ser:
+Bem alinhados
+Organizados ao longo da página
+De fácil uso
+Selectbox
+Deve ser:
+Clean
+Simples de usar
+Intuitivo
+Diretriz Geral de UX/UI
+Evitar elementos visuais rebuscados
+Evitar complexidade desnecessária
+Priorizar:
+Clareza
+Usabilidade
+Organização visual
+Comportamento Esperado
+O usuário deve conseguir navegar facilmente entre as tabs
+O usuário deve conseguir comparar diferentes regiões sem dificuldade
+O usuário deve conseguir entender rapidamente:
+Se houve valorização real
+Quais regiões performaram melhor
+Como os preços se comportam frente à inflação
+
+Se quiser, posso ir para o próximo nível e transformar isso em:
+
+Arquitetura de pastas + código base
+Protótipo visual (wireframe)
+Ou já um app funcional em Streamlit ou outro framework
