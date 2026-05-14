@@ -65,14 +65,6 @@ def inject_theme() -> None:
                 color: white !important;
             }}
 
-            .panel-card {{
-                background: rgba(255,255,255,0.92);
-                border: 1px solid rgba(16, 33, 61, 0.08);
-                border-radius: 22px;
-                padding: 1rem 1.1rem;
-                box-shadow: 0 18px 50px rgba(16, 33, 61, 0.05);
-            }}
-
             .hero {{
                 padding: 1.7rem 1.2rem 1.05rem 1.2rem;
                 border-radius: 22px;
@@ -97,7 +89,7 @@ def inject_theme() -> None:
             .hero p {{
                 margin: 0.3rem 0 0 0;
                 color: rgba(255,255,255,0.82);
-                max-width: 48ch;
+                max-width: 56ch;
                 font-size: 0.95rem;
             }}
 
@@ -274,13 +266,17 @@ def inject_theme() -> None:
     )
 
 
-def render_hero() -> None:
+def render_hero(
+    title: str = "Mercado Residencial",
+    description: str = "Preço nominal, preço real e comparação entre cidades e bairros.",
+    eyebrow: str = "Imóveis Brasil",
+) -> None:
     st.markdown(
-        """
+        f"""
         <div class="hero">
-            <div class="section-label">Imóveis Brasil</div>
-            <h1>Mercado Residencial</h1>
-            <p>Preço nominal, preço real e comparação entre cidades e bairros.</p>
+            <div class="section-label">{eyebrow}</div>
+            <h1>{title}</h1>
+            <p>{description}</p>
         </div>
         """,
         unsafe_allow_html=True,

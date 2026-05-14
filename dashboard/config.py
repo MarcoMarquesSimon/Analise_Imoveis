@@ -17,6 +17,35 @@ SGS_CODES = {
 
 EXCLUDED_FIPEZAP_SHEETS = {"Resumo", "Aux", "Índice FipeZAP"}
 
+FIPEZAP_SEGMENTS = {
+    "residential": {
+        "label": "Residencial",
+        "sheet_label": "Imóveis residenciais",
+        "refs": {
+            "date": "B",
+            "sale_index": "C",
+            "sale_var_12m": "M",
+            "sale_price_m2": "R",
+            "rent_index": "W",
+            "rent_price_m2": "AL",
+            "rental_yield": "AQ",
+        },
+    },
+    "commercial": {
+        "label": "Comercial",
+        "sheet_label": "Imóveis comerciais",
+        "refs": {
+            "date": "B",
+            "sale_index": "AV",
+            "sale_var_12m": "AX",
+            "sale_price_m2": "AY",
+            "rent_index": "AZ",
+            "rent_price_m2": "BC",
+            "rental_yield": "BD",
+        },
+    },
+}
+
 CITY_NAME_MAP = {
     "sao paulo": "São Paulo",
     "rio de janeiro": "Rio de Janeiro",
