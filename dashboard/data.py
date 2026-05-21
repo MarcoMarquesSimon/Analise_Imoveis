@@ -392,7 +392,7 @@ def load_macro_series() -> pd.DataFrame:
         return pd.concat(frames, ignore_index=True)
 
     return _load_disk_cache(
-        "macro_series",
+        "macro_series_v2",
         builder=builder,
         max_age_seconds=MACRO_CACHE_MAX_AGE_SECONDS,
         allow_stale_on_error=True,
@@ -413,6 +413,29 @@ def load_ipca_reference() -> pd.DataFrame:
     ipca["deflator_to_latest"] = latest_index / ipca["ipca_index"]
     ipca["ipca_cumulative_pct"] = (ipca["ipca_index"] / ipca["ipca_index"].iloc[0] - 1) * 100
     return ipca[["date", "ipca_monthly_pct", "ipca_index", "deflator_to_latest", "ipca_cumulative_pct"]]
+
+
+@lru_cache(maxsize=1)
+def load_cdi_reference() -> pd.DataFrame:
+    macro = load_macro_series()
+    cdi = macro[macro["indicator"] == "CDI"].copy()
+    if cdi.empty:
+        return pd.DataFrame(columns=["date", "cdi_monthly_pct", "cdi_index", "cdi_real_index"])
+
+    ipca = load_ipca_reference()
+    cdi = cdi.sort_values("date").reset_index(drop=True)
+    cdi["cdi_monthly_pct"] = cdi["value"]
+    cdi["cdi_index"] = (1 + cdi["cdi_monthly_pct"] / 100).cumprod() * 100
+
+    if not ipca.empty:
+        merged = cdi.merge(ipca[["date", "ipca_monthly_pct"]], on="date", how="left")
+        merged["ipca_monthly_pct"] = merged["ipca_monthly_pct"].fillna(0.0)
+        real_monthly = (1 + merged["cdi_monthly_pct"] / 100) / (1 + merged["ipca_monthly_pct"] / 100) - 1
+        merged["cdi_real_index"] = (1 + real_monthly).cumprod() * 100
+        return merged[["date", "cdi_monthly_pct", "cdi_index", "cdi_real_index"]]
+
+    cdi["cdi_real_index"] = cdi["cdi_index"]
+    return cdi[["date", "cdi_monthly_pct", "cdi_index", "cdi_real_index"]]
 
 
 def merge_with_ipca(df: pd.DataFrame, value_columns: list[str]) -> pd.DataFrame:
@@ -565,6 +588,15 @@ def build_comparison_series(segment: str = "residential") -> pd.DataFrame:
     ipca = load_ipca_reference()[["date", "ipca_index"]].rename(columns={"ipca_index": "value"})
     ipca["series_name"] = "IPCA"
 
+    cdi_ref = load_cdi_reference()
+    cdi_frames = []
+    if not cdi_ref.empty:
+        cdi_nom = cdi_ref[["date", "cdi_index"]].rename(columns={"cdi_index": "value"}).copy()
+        cdi_nom["series_name"] = "CDI"
+        cdi_real = cdi_ref[["date", "cdi_real_index"]].rename(columns={"cdi_real_index": "value"}).copy()
+        cdi_real["series_name"] = "CDI Real"
+        cdi_frames = [cdi_nom[["date", "series_name", "value"]], cdi_real[["date", "series_name", "value"]]]
+
     frames = [
         sale_composite[["date", "series_name", "value"]],
         rent_composite[["date", "series_name", "value"]],
@@ -574,6 +606,7 @@ def build_comparison_series(segment: str = "residential") -> pd.DataFrame:
         igmi_brasil[["date", "series_name", "value"]],
         selected_macro[["date", "series_name", "value"]],
         ipca[["date", "series_name", "value"]],
+        *cdi_frames,
     ]
     return pd.concat(frames, ignore_index=True).sort_values(["series_name", "date"])
 

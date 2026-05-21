@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(del .cache\\\\macro_series_v2.pkl)",
+      "Bash(python -c ' *)",
+      "Bash(dir .cache\\\\macro_series_v2.pkl)",
+      "Bash(Remove-Item \"C:\\\\Users\\\\usuar\\\\Downloads\\\\Programming\\\\Analise_Imoveis_Brasil-Codex\\\\.cache\\\\macro_series_v2.pkl\" -ErrorAction SilentlyContinue)",
+      "Bash(Test-Path \"C:\\\\Users\\\\usuar\\\\Downloads\\\\Programming\\\\Analise_Imoveis_Brasil-Codex\\\\.cache\\\\macro_series_v2.pkl\")",
+      "Bash(python -m streamlit run app.py --server.headless true --server.port 8501)"
+    ]
+  }
+}

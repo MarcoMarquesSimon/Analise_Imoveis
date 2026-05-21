@@ -13,6 +13,7 @@ SGS_CODES = {
     "IPCA": 433,
     "IVG-R": 21340,
     "MVG-R": 25419,
+    "CDI": 4390,
 }
 
 EXCLUDED_FIPEZAP_SHEETS = {"Resumo", "Aux", "Índice FipeZAP"}

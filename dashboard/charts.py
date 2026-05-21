@@ -120,9 +120,10 @@ def comparison_chart(
 def neighborhood_chart(
     prices_df: pd.DataFrame,
     value_col: str,
-    ipca_df: pd.DataFrame,
-    title: str,
-    y_title: str,
+    reference_df: pd.DataFrame | None,
+    reference_label: str = "CDI",
+    title: str = "",
+    y_title: str = "",
     compact_legend: bool = False,
 ) -> go.Figure:
     fig = go.Figure()
@@ -140,15 +141,16 @@ def neighborhood_chart(
             )
         )
 
-    fig.add_trace(
-        go.Scatter(
-            x=ipca_df["date"],
-            y=ipca_df[value_col],
-            mode="lines",
-            name="IPCA",
-            line=dict(color=THEME["accent"], width=2, dash="dash"),
-            hovertemplate="%{x|%b/%Y}<br>IPCA: %{y:,.1f}<extra></extra>",
+    if reference_df is not None and not reference_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=reference_df["date"],
+                y=reference_df["plot_value"],
+                mode="lines",
+                name=reference_label,
+                line=dict(color=THEME["accent"], width=2, dash="dash"),
+                hovertemplate=f"%{{x|%b/%Y}}<br>{reference_label}: %{{y:,.1f}}<extra></extra>",
+            )
         )
-    )
 
     return _base_layout(fig, title=title, y_title=y_title, compact_legend=compact_legend)

@@ -9,6 +9,7 @@ from dashboard.data import (
     build_comparison_series,
     compute_growth,
     filter_period,
+    load_cdi_reference,
     load_city_metadata,
     load_city_series_with_real_values,
     load_igmi_series,
@@ -82,6 +83,11 @@ def get_neighborhood_series() -> pd.DataFrame:
 @st.cache_data(show_spinner=False, persist="disk")
 def get_neighborhood_metadata() -> dict:
     return load_neighborhood_metadata()
+
+
+@st.cache_data(show_spinner=False, persist="disk")
+def get_cdi_reference() -> pd.DataFrame:
+    return load_cdi_reference()
 
 
 @st.cache_data(show_spinner=False, persist="disk")
@@ -238,6 +244,15 @@ def build_ipca_window(ipca_reference: pd.DataFrame, start_date, end_date) -> pd.
     return ipca_filtered
 
 
+def build_cdi_window(cdi_reference: pd.DataFrame, start_date, end_date, series: str = "cdi_index") -> pd.DataFrame:
+    cdi_filtered = filter_period(cdi_reference, start_date, end_date).copy()
+    if cdi_filtered.empty or series not in cdi_filtered.columns:
+        return pd.DataFrame(columns=["date", "plot_value"])
+    base = cdi_filtered[series].iloc[0]
+    cdi_filtered["plot_value"] = (cdi_filtered[series] / base) * 100
+    return cdi_filtered[["date", "plot_value"]]
+
+
 def format_preview_df(df: pd.DataFrame) -> pd.DataFrame:
     display_df = df.copy()
     if "date" in display_df.columns:
@@ -333,7 +348,7 @@ def get_market_config(asset_class: str, market_type: str, rent_view: str = "Rece
                 "label": "yield de aluguel",
                 "price_col": "rental_yield",
                 "real_col": "rental_yield",
-                "secondary_series": [names["yield_composite"], names["rent_composite"], "IPCA"],
+                "secondary_series": [names["yield_composite"], names["rent_composite"], "IPCA", "CDI", "CDI Real"],
                 "composite_series": names["yield_composite"],
                 "value_prefix": "",
                 "value_suffix": "%",
@@ -347,7 +362,7 @@ def get_market_config(asset_class: str, market_type: str, rent_view: str = "Rece
             "label": "recebimento de aluguel",
             "price_col": "aluguel_m2",
             "real_col": "aluguel_m2_real",
-            "secondary_series": [names["received_composite"], names["rent_composite"], "IPCA"],
+            "secondary_series": [names["received_composite"], names["rent_composite"], "IPCA", "CDI", "CDI Real"],
             "composite_series": names["received_composite"],
             "value_prefix": "R$ ",
             "value_suffix": "/m²",
@@ -361,7 +376,7 @@ def get_market_config(asset_class: str, market_type: str, rent_view: str = "Rece
         "label": "venda",
         "price_col": "sale_price_m2",
         "real_col": "sale_price_m2_real",
-        "secondary_series": [names["sale_composite"], "IVG-R", "IGMI-R Brasil", "MVG-R", "IPCA"],
+        "secondary_series": [names["sale_composite"], "IVG-R", "IGMI-R Brasil", "MVG-R", "IPCA", "CDI", "CDI Real"],
         "composite_series": names["sale_composite"],
         "value_prefix": "R$ ",
         "value_suffix": "/m²",
@@ -492,6 +507,40 @@ def render_panorama(asset_class: str) -> None:
             real_df["line_kind"] = "Real"
             real_df["series_key"] = real_df["city"] + "_real"
             plot_frames.append(real_df[["date", "city", "line_kind", "series_key", "plot_value"]])
+
+        if chart_mode == "Base 100" and market_type == "Venda":
+            cdi_ref = get_cdi_reference()
+            cdi_win = filter_period(cdi_ref, *date_range)
+            if not cdi_win.empty:
+                if "Nominal" in series_visibility:
+                    tr_nom = filtered[["date", "city", "indice_total_return_window"]].copy()
+                    tr_nom["plot_value"] = tr_nom["indice_total_return_window"] * 100
+                    tr_nom["city"] = tr_nom["city"] + " + Aluguel"
+                    tr_nom["line_kind"] = "Nominal"
+                    tr_nom["series_key"] = tr_nom["city"] + "_nominal"
+                    plot_frames.append(tr_nom[["date", "city", "line_kind", "series_key", "plot_value"]])
+
+                    cdi_n = cdi_win[["date", "cdi_index"]].copy()
+                    cdi_n["plot_value"] = cdi_n["cdi_index"]
+                    cdi_n["city"] = "CDI"
+                    cdi_n["line_kind"] = "Nominal"
+                    cdi_n["series_key"] = "CDI_nominal"
+                    plot_frames.append(cdi_n[["date", "city", "line_kind", "series_key", "plot_value"]])
+
+                if "Real" in series_visibility:
+                    tr_real = filtered[["date", "city", "indice_total_return_real_window"]].copy()
+                    tr_real["plot_value"] = tr_real["indice_total_return_real_window"] * 100
+                    tr_real["city"] = tr_real["city"] + " + Aluguel"
+                    tr_real["line_kind"] = "Real"
+                    tr_real["series_key"] = tr_real["city"] + "_real"
+                    plot_frames.append(tr_real[["date", "city", "line_kind", "series_key", "plot_value"]])
+
+                    cdi_r = cdi_win[["date", "cdi_real_index"]].copy()
+                    cdi_r["plot_value"] = cdi_r["cdi_real_index"]
+                    cdi_r["city"] = "CDI"
+                    cdi_r["line_kind"] = "Real"
+                    cdi_r["series_key"] = "CDI_real"
+                    plot_frames.append(cdi_r[["date", "city", "line_kind", "series_key", "plot_value"]])
     else:
         yield_df = filtered[["date", "city", market["price_col"]]].copy()
         yield_df["plot_value"] = yield_df[market["price_col"]] * market["multiplier"]
@@ -754,9 +803,6 @@ def render_neighborhoods() -> None:
 
     filtered = city_filtered[city_filtered["label"].isin(selected_labels)].sort_values(["label", "date"])
     growth = compute_growth(filtered, group_col="label", nominal_col="price_m2", real_col="price_m2_real")
-    ipca_plot = build_ipca_window(get_ipca_reference(), *date_range).copy()
-    ipca_plot["label"] = "IPCA"
-    ipca_plot["plot_value"] = ipca_plot["ipca_window_base_100"]
     nominal_base_df = rebase_by_group(filtered, group_col="label", value_col="price_m2", new_col="plot_value")
     real_base_df = rebase_by_group(filtered, group_col="label", value_col="price_m2_real", new_col="plot_value")
     chart_variant = st.radio(
@@ -765,6 +811,11 @@ def render_neighborhoods() -> None:
         horizontal=True,
         key="residential_neighborhood_variant",
     )
+
+    cdi_series_col = "cdi_index" if chart_variant == "Nominal" else "cdi_real_index"
+    cdi_label = "CDI" if chart_variant == "Nominal" else "CDI Real"
+    cdi_plot = build_cdi_window(get_cdi_reference(), *date_range, series=cdi_series_col)
+    cdi_plot = cdi_plot if not cdi_plot.empty else None
 
     selected_snapshot = latest_snapshot[latest_snapshot["label"].isin(selected_labels)]
     summary_table = (
@@ -797,7 +848,8 @@ def render_neighborhoods() -> None:
         neighborhood_chart(
             active_df,
             value_col="plot_value",
-            ipca_df=ipca_plot,
+            reference_df=cdi_plot,
+            reference_label=cdi_label,
             title="",
             y_title="Base 100",
             compact_legend=len(selected_labels) > 8,
