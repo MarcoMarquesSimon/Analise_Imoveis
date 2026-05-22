@@ -79,13 +79,43 @@ THEME = {
     "success": "#0D7A5F",
 }
 
-CHART_COLORS = [
-    "#163A63",
-    "#285989",
-    "#3B74A8",
-    "#C4963B",
-    "#0D7A5F",
-    "#A55D3A",
-    "#5D4D8C",
-    "#7286A0",
+# ── Chart colour palette ────────────────────────────────────────────────────
+# Slots are ordered to match how series_labels first appear in the unified
+# chart (alphabetical rebase_key sort → Aluguel, Imóvel+Aluguel, Venda,
+# then overflow for additional cities):
+#   slot 0 → Aluguel family          (vivid orange)
+#   slot 1 → Imóvel + Aluguel family (rich teal)
+#   slot 2 → Venda family            (strong blue)
+#   slots 3-7 → overflow for multi-city or additional families
+CHART_COLORS: list[str] = [
+    "#EA580C",  # vivid orange  — Aluguel
+    "#0D9488",  # rich teal     — Imóvel + Aluguel
+    "#2563EB",  # strong blue   — Venda
+    "#6366F1",  # indigo        — 4th series/city overflow
+    "#0891B2",  # cyan          — 5th
+    "#65A30D",  # lime green    — 6th
+    "#BE185D",  # magenta-pink  — 7th
+    "#64748B",  # slate         — 8th
 ]
+
+# Global benchmark series are pinned to fixed colours so they are always
+# the same regardless of how many cities are selected (overrides the sequence).
+SERIES_FIXED_COLORS: dict[str, str] = {
+    "CDI": "#7C3AED",   # distinct violet-purple
+    "IPCA": "#DC2626",  # warm red
+}
+
+# Lighter counterparts for real (IPCA-deflated, dashed) series lines.
+# Each nominal base colour maps to its real variant (≈60% lightness).
+# Applied per-trace after figure creation so the dash style reinforces
+# the nominal vs real hierarchy.
+REAL_COLOR_MAP: dict[str, str] = {
+    "#EA580C": "#FCA86A",  # Aluguel real       — light orange
+    "#0D9488": "#5EEAD4",  # Imóvel+Aluguel real — light teal
+    "#2563EB": "#93C5FD",  # Venda real          — light blue
+    "#6366F1": "#A5B4FC",  # indigo real
+    "#0891B2": "#67E8F9",  # cyan real
+    "#65A30D": "#A3E635",  # lime real
+    "#BE185D": "#F9A8D4",  # pink real
+    "#64748B": "#CBD5E1",  # slate real
+}

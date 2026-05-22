@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from dashboard.config import CHART_COLORS, THEME
+from dashboard.config import CHART_COLORS, REAL_COLOR_MAP, SERIES_FIXED_COLORS, THEME
 
 
 def _base_layout(
@@ -64,11 +64,23 @@ def line_chart(
     dash_map: dict[str, str] | None = None,
     compact_legend: bool = False,
 ) -> go.Figure:
-    line_kwargs = {}
+    # Build px.line keyword arguments -------------------------------------------
+    px_kwargs: dict = {"line_shape": "spline"}
     if dash_col:
-        line_kwargs["line_dash"] = dash_col
+        px_kwargs["line_dash"] = dash_col
     if dash_map:
-        line_kwargs["line_dash_map"] = dash_map
+        px_kwargs["line_dash_map"] = dash_map
+
+    # Pin known global benchmark series (CDI, IPCA) to their fixed colours so
+    # they are always the same hue regardless of how many cities are shown.
+    # All other series receive colours from CHART_COLORS in first-appearance order.
+    _fixed = {
+        name: colour
+        for name, colour in SERIES_FIXED_COLORS.items()
+        if name in df[color_col].values
+    }
+    if _fixed:
+        px_kwargs["color_discrete_map"] = _fixed
 
     fig = px.line(
         df,
@@ -76,11 +88,10 @@ def line_chart(
         y=value_col,
         color=color_col,
         color_discrete_sequence=CHART_COLORS,
-        line_shape="spline",
-        **line_kwargs,
+        **px_kwargs,
     )
+
     fig.update_traces(
-        line=dict(width=3),
         mode="lines",
         hovertemplate=(
             "%{x|%b/%Y}<br>%{fullData.name}: "
@@ -92,6 +103,24 @@ def line_chart(
             + "<extra></extra>"
         ),
     )
+
+    # Per-trace stroke width and colour correction:
+    #   • nominal (solid)  → 2.5 px, full-saturation colour
+    #   • real    (dashed) → 2.0 px, lighter counterpart from REAL_COLOR_MAP
+    # The lighter colour reinforces the dash style to create a clear visual
+    # hierarchy between nominal and IPCA-deflated series.
+    for trace in fig.data:
+        _dash = getattr(trace.line, "dash", None)
+        _is_real = bool(_dash) and _dash not in ("solid",)
+        if _is_real:
+            _lighter = REAL_COLOR_MAP.get(trace.line.color)
+            trace.line.update(
+                width=2.0,
+                **({"color": _lighter} if _lighter else {}),
+            )
+        else:
+            trace.line.width = 2.5
+
     return _base_layout(fig, title=title, y_title=y_title, compact_legend=compact_legend)
 
 
@@ -101,16 +130,22 @@ def comparison_chart(
     y_title: str = "Base 100",
     compact_legend: bool = False,
 ) -> go.Figure:
+    _fixed = {
+        name: colour
+        for name, colour in SERIES_FIXED_COLORS.items()
+        if name in df["series_name"].values
+    }
     fig = px.line(
         df,
         x="date",
         y="rebased_value",
         color="series_name",
         color_discrete_sequence=CHART_COLORS,
+        **({"color_discrete_map": _fixed} if _fixed else {}),
         line_shape="spline",
     )
     fig.update_traces(
-        line=dict(width=3),
+        line=dict(width=2.5),
         mode="lines",
         hovertemplate="%{x|%b/%Y}<br>%{fullData.name}: %{y:,.1f}<extra></extra>",
     )
@@ -136,7 +171,7 @@ def neighborhood_chart(
                 y=subset[value_col],
                 mode="lines",
                 name=label,
-                line=dict(color=CHART_COLORS[index % len(CHART_COLORS)], width=3),
+                line=dict(color=CHART_COLORS[index % len(CHART_COLORS)], width=2.5),
                 hovertemplate="%{x|%b/%Y}<br>%{fullData.name}: %{y:,.1f}<extra></extra>",
             )
         )
@@ -148,7 +183,7 @@ def neighborhood_chart(
                 y=reference_df["plot_value"],
                 mode="lines",
                 name=reference_label,
-                line=dict(color=THEME["accent"], width=2, dash="dash"),
+                line=dict(color=SERIES_FIXED_COLORS.get(reference_label, THEME["accent"]), width=2.0, dash="dash"),
                 hovertemplate=f"%{{x|%b/%Y}}<br>{reference_label}: %{{y:,.1f}}<extra></extra>",
             )
         )
