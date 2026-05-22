@@ -544,14 +544,14 @@ def _comparison_series_names(segment: str) -> dict[str, str]:
             "rent": "FipeZap Comercial Aluguel Composto",
             "received": "Aluguel Comercial Recebido Composto",
             "total_return": "Retorno Total Comercial Composto",
-            "yield": "Yield de Aluguel Comercial Composto",
+            "yield": "Imóvel — Yield de Aluguel Comercial Composto",
         }
     return {
         "sale": "FipeZap Venda Composto",
         "rent": "FipeZap Aluguel Composto",
         "received": "Aluguel Recebido Composto",
         "total_return": "Retorno Total Composto",
-        "yield": "Yield de Aluguel Composto",
+        "yield": "Imóvel — Yield de Aluguel Composto",
     }
 
 

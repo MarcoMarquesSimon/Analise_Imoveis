@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from dashboard.charts import comparison_chart, line_chart, neighborhood_chart
+from dashboard.charts import line_chart, neighborhood_chart
 from dashboard.data import (
     add_total_return_columns,
     build_comparison_series,
@@ -288,64 +288,220 @@ def format_preview_df(df: pd.DataFrame) -> pd.DataFrame:
     return display_df
 
 
-def render_growth_kpis(
-    growth: pd.DataFrame,
-    entity_col: str,
-    period_label: str,
-    positive_label: str,
+# ── Return cards ──────────────────────────────────────────────────────────────
+
+_RETURN_CARDS_CSS = """
+<style>
+.ret-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:.4rem 0 .85rem}
+@media(max-width:640px){.ret-grid{grid-template-columns:1fr}}
+.rc{background:#fff;border-left:3px solid #163A63;border-radius:6px;padding:.55rem .75rem}
+.rc.pos{border-left-color:#0D7A5F}
+.rc.neg{border-left-color:#A55D3A}
+.rc.neut{border-left-color:#285989}
+.rc-header{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem;
+           min-height:1.6rem}
+.rc-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:#66758A;
+          font-weight:700;line-height:1.2;align-self:center}
+.rc-value{font-size:1.2rem;font-weight:900;color:#10213D;line-height:1;flex-shrink:0;
+          white-space:nowrap}
+.rc.pos .rc-value{color:#0D7A5F}
+.rc.neg .rc-value{color:#A55D3A}
+.rc.neut .rc-value{color:#285989}
+.rc-sub{font-size:.66rem;color:#66758A;margin-top:.18rem;line-height:1.35}
+.rc-ann{font-size:.64rem;color:#8A97A8;margin-top:.1rem}
+.rc-badge-win{display:inline-block;padding:.12rem .45rem;border-radius:999px;font-size:.66rem;
+              font-weight:700;margin-top:.28rem;background:rgba(13,122,95,.12);color:#0D7A5F;
+              box-shadow:0 0 8px rgba(13,122,95,.28)}
+.rc-badge-lose{display:inline-block;padding:.12rem .45rem;border-radius:999px;font-size:.66rem;
+               font-weight:700;margin-top:.28rem;background:rgba(180,30,30,.1);color:#B41E1E;
+               animation:rc-pulse 1.6s ease-in-out infinite}
+@keyframes rc-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.rc-bar-wrap{margin-top:.4rem}
+.rc-bar-row{display:flex;align-items:center;gap:.35rem;margin-bottom:.16rem;
+            font-size:.63rem;color:#66758A}
+.rc-bar-lbl{width:2.8rem;text-align:right;white-space:nowrap}
+.rc-bar-bg{flex:1;background:#EAF0F7;border-radius:4px;height:5px;overflow:hidden}
+.rc-bar-fill{height:100%;border-radius:4px}
+</style>
+"""
+
+
+def _rc_n_months(start, end) -> int:
+    s, e = pd.Timestamp(start), pd.Timestamp(end)
+    return max(int((e.year - s.year) * 12 + (e.month - s.month)), 1)
+
+
+def _rc_annualize(total_pct: float, n_months: int) -> float:
+    return ((1 + total_pct / 100) ** (12 / max(n_months, 1)) - 1) * 100
+
+
+def _rc_total_return(df: pd.DataFrame, price_col: str) -> float | None:
+    if df.empty or price_col not in df.columns:
+        return None
+    results = []
+    groups = df.groupby("city") if "city" in df.columns else [(None, df)]
+    for _, sub in groups:
+        vals = sub.sort_values("date")[price_col].dropna()
+        if len(vals) < 2:
+            continue
+        first = vals.iloc[0]
+        if first == 0 or pd.isna(first):
+            continue
+        results.append((vals.iloc[-1] / first - 1) * 100)
+    return sum(results) / len(results) if results else None
+
+
+def _rc_ipca_return(ipca_reference: pd.DataFrame, date_range: tuple) -> float | None:
+    filt = filter_period(ipca_reference, *date_range)
+    if filt.empty or "ipca_index" not in filt.columns:
+        return None
+    valid = filt["ipca_index"].dropna()
+    if len(valid) < 2 or valid.iloc[0] == 0:
+        return None
+    return (valid.iloc[-1] / valid.iloc[0] - 1) * 100
+
+
+def _rc_fmt(v: float) -> str:
+    return f"{v:+,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _rc_na(title: str) -> str:
+    return (
+        '<div class="rc neut">'
+        f'<div class="rc-header">'
+        f'<span class="rc-title">{title}</span>'
+        '<span class="rc-value" style="font-size:.82rem;color:#66758A;font-weight:600">'
+        "Dados insuficientes</span></div></div>"
+    )
+
+
+def render_return_cards(
+    filtered: pd.DataFrame,
+    market: dict,
+    date_range: tuple,
+    ipca_reference: pd.DataFrame,
 ) -> None:
-    if growth.empty:
-        st.info("Sem dados suficientes para calcular as KPIs neste recorte.")
-        return
+    st.markdown(_RETURN_CARDS_CSS, unsafe_allow_html=True)
 
-    top_entity = growth.iloc[0]
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
-    with metric_col1:
-        render_metric_card(
-            "Variação nominal média",
-            format_pct(growth["nominal_growth_pct"].mean()),
-            period_label,
+    n_months = _rc_n_months(date_range[0], date_range[1])
+    nom_total = _rc_total_return(filtered, market["price_col"])
+    real_total = (
+        _rc_total_return(filtered, market["real_col"])
+        if market.get("supports_real") and market.get("real_col") in filtered.columns
+        else None
+    )
+    ipca_total = _rc_ipca_return(ipca_reference, date_range)
+
+    # When the real price column is unavailable (e.g. yield mode), derive real return
+    # directly from the formula: ((1 + nominal) / (1 + inflation)) − 1
+    if real_total is None and nom_total is not None and ipca_total is not None:
+        real_total = ((1 + nom_total / 100) / (1 + ipca_total / 100) - 1) * 100
+
+    # Card 1 — Retorno Nominal
+    if nom_total is not None:
+        nom_ann = _rc_annualize(nom_total, n_months)
+        cls = "pos" if nom_total >= 0 else "neg"
+        c1 = (
+            f'<div class="rc {cls}">'
+            '<div class="rc-header">'
+            '<span class="rc-title">Retorno Nominal</span>'
+            f'<span class="rc-value">{_rc_fmt(nom_total)}</span>'
+            "</div>"
+            f'<div class="rc-sub">{n_months} meses</div>'
+            f'<div class="rc-ann">{_rc_fmt(nom_ann)} a.a.</div>'
+            "</div>"
         )
-    with metric_col2:
-        render_metric_card(
-            "Variação real média",
-            format_pct(growth["real_growth_pct"].mean()),
-            positive_label,
+    else:
+        c1 = _rc_na("Retorno Nominal")
+
+    # Card 2 — Retorno Real (ajustado pelo IPCA)
+    if real_total is not None:
+        real_ann = _rc_annualize(real_total, n_months)
+        cls = "pos" if real_total >= 0 else "neg"
+        if ipca_total is not None:
+            ipca_str = "0%" if ipca_total == 0 else _rc_fmt(ipca_total)
+            ipca_line = f"Infla&ccedil;&atilde;o no per&iacute;odo: {ipca_str}"
+        else:
+            ipca_line = "IPCA: 0%"
+        c2 = (
+            f'<div class="rc {cls}">'
+            '<div class="rc-header">'
+            '<span class="rc-title">Retorno Real (ajustado pelo IPCA)</span>'
+            f'<span class="rc-value">{_rc_fmt(real_total)}</span>'
+            "</div>"
+            f'<div class="rc-sub">{ipca_line}</div>'
+            f'<div class="rc-ann">{_rc_fmt(real_ann)} a.a. real</div>'
+            "</div>"
         )
-    with metric_col3:
-        render_metric_card(
-            "Maior alta real",
-            format_pct(top_entity["real_growth_pct"]),
-            top_entity[entity_col],
+    else:
+        c2 = _rc_na("Retorno Real (ajustado pelo IPCA)")
+
+    # Card 3 — Ganho Real vs Inflação
+    if nom_total is not None and ipca_total is not None:
+        spread = nom_total - ipca_total
+        cls3 = "pos" if spread > 0 else "neg"
+        if spread > 0:
+            badge = '<div class="rc-badge-win">&#10022; Bateu a infla&ccedil;&atilde;o</div>'
+        else:
+            badge = '<div class="rc-badge-lose">&#10008; Perdeu para a infla&ccedil;&atilde;o</div>'
+        max_abs = max(abs(nom_total), abs(ipca_total), 0.1)
+        asset_w = int(min(abs(nom_total) / max_abs * 100, 100))
+        ipca_w = int(min(abs(ipca_total) / max_abs * 100, 100))
+        asset_color = "#0D7A5F" if nom_total >= ipca_total else "#A55D3A"
+        bar = (
+            '<div class="rc-bar-wrap">'
+            '<div class="rc-bar-row">'
+            '<span class="rc-bar-lbl">Im&oacute;vel</span>'
+            f'<div class="rc-bar-bg"><div class="rc-bar-fill" style="width:{asset_w}%;background:{asset_color}"></div></div>'
+            f'<span>{_rc_fmt(nom_total)}</span></div>'
+            '<div class="rc-bar-row">'
+            '<span class="rc-bar-lbl">IPCA</span>'
+            f'<div class="rc-bar-bg"><div class="rc-bar-fill" style="width:{ipca_w}%;background:#163A63"></div></div>'
+            f'<span>{_rc_fmt(ipca_total)}</span></div>'
+            "</div>"
         )
+        c3 = (
+            f'<div class="rc {cls3}">'
+            '<div class="rc-header">'
+            '<span class="rc-title">Ganho Real vs Infla&ccedil;&atilde;o</span>'
+            f'<span class="rc-value">{_rc_fmt(spread)} p.p.</span>'
+            "</div>"
+            f"{badge}"
+            f"{bar}"
+            "</div>"
+        )
+    else:
+        c3 = _rc_na("Ganho Real vs Inflação")
+
+    st.markdown(f'<div class="ret-grid">{c1}{c2}{c3}</div>', unsafe_allow_html=True)
 
 
-def get_market_config(asset_class: str, market_type: str, rent_view: str = "Recebimento") -> dict:
+def get_market_config(asset_class: str, market_type: str, rent_view: str = "Imóvel + Aluguel") -> dict:
     if asset_class == "commercial":
         names = {
             "sale_composite": "FipeZap Comercial Venda Composto",
             "rent_composite": "FipeZap Comercial Aluguel Composto",
             "received_composite": "Aluguel Comercial Recebido Composto",
-            "yield_composite": "Yield de Aluguel Comercial Composto",
+            "yield_composite": "Imóvel — Yield de Aluguel Comercial Composto",
             "sale_title": "Preço do m² de venda comercial por cidade",
-            "received_title": "Recebimento de aluguel comercial por cidade",
-            "yield_title": "Yield de aluguel comercial por cidade",
+            "received_title": "Imóvel + Aluguel — Recebimento comercial por cidade",
+            "yield_title": "Imóvel — Yield de aluguel comercial por cidade",
         }
     else:
         names = {
             "sale_composite": "FipeZap Venda Composto",
             "rent_composite": "FipeZap Aluguel Composto",
             "received_composite": "Aluguel Recebido Composto",
-            "yield_composite": "Yield de Aluguel Composto",
+            "yield_composite": "Imóvel — Yield de Aluguel Composto",
             "sale_title": "Preço do m² de venda por cidade",
-            "received_title": "Recebimento de aluguel por cidade",
-            "yield_title": "Yield de aluguel por cidade",
+            "received_title": "Imóvel + Aluguel — Recebimento por cidade",
+            "yield_title": "Imóvel — Yield de aluguel por cidade",
         }
 
     if market_type == "Aluguel":
-        if rent_view == "Yield":
+        if rent_view == "Imóvel":
             return {
-                "label": "yield de aluguel",
+                "label": "imóvel",
                 "price_col": "rental_yield",
                 "real_col": "rental_yield",
                 "secondary_series": [names["yield_composite"], names["rent_composite"], "IPCA", "CDI", "CDI Real"],
@@ -354,12 +510,12 @@ def get_market_config(asset_class: str, market_type: str, rent_view: str = "Rece
                 "value_suffix": "%",
                 "value_format": ",.2f",
                 "multiplier": 100.0,
-                "y_title": "Yield de aluguel (%)",
+                "y_title": "Imóvel — Yield (%)",
                 "supports_real": False,
                 "chart_heading": names["yield_title"],
             }
         return {
-            "label": "recebimento de aluguel",
+            "label": "imóvel + aluguel",
             "price_col": "aluguel_m2",
             "real_col": "aluguel_m2_real",
             "secondary_series": [names["received_composite"], names["rent_composite"], "IPCA", "CDI", "CDI Real"],
@@ -369,7 +525,7 @@ def get_market_config(asset_class: str, market_type: str, rent_view: str = "Rece
             "value_format": ",.2f",
             "multiplier": 1.0,
             "supports_real": True,
-            "y_title": "Recebimento mensal por aluguel (R$/m²)",
+            "y_title": "Imóvel + Aluguel (R$/m²)",
             "chart_heading": names["received_title"],
         }
     return {
@@ -391,7 +547,9 @@ def get_market_config(asset_class: str, market_type: str, rent_view: str = "Rece
 def render_panorama(asset_class: str) -> None:
     metadata = get_city_metadata(asset_class)
     key_prefix = f"{asset_class}_panorama"
-    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([1.45, 1.0, 0.85, 0.85])
+
+    # ── Filters: Cidades · Período · Escala ───────────────────────────────────
+    filter_col1, filter_col2, filter_col3 = st.columns([1.45, 1.0, 0.85])
     all_cities = metadata["cities"]
     start_default = max(metadata["min_date"], metadata["max_date"] - pd.DateOffset(years=8)).date()
     end_default = metadata["max_date"].date()
@@ -417,15 +575,6 @@ def render_panorama(asset_class: str) -> None:
             label_visibility="collapsed",
         )
     with filter_col3:
-        render_filter_heading("Mercado")
-        market_type = st.radio(
-            "Mercado",
-            ["Venda", "Aluguel"],
-            horizontal=True,
-            key=f"{key_prefix}_market",
-            label_visibility="collapsed",
-        )
-    with filter_col4:
         render_filter_heading("Escala")
         chart_mode = st.radio(
             "Escala",
@@ -439,309 +588,154 @@ def render_panorama(asset_class: str) -> None:
         st.info("Escolha uma ou mais cidades para começar a análise.")
         return
 
-    rent_view = "Recebimento"
-    if market_type == "Aluguel":
-        metric_col, _ = st.columns([1.15, 2.85])
-        with metric_col:
-            render_filter_heading("Métrica")
-            rent_view = st.radio(
-                "Métrica de aluguel",
-                ["Yield", "Recebimento"],
-                horizontal=True,
-                key=f"{key_prefix}_rent_view",
-                label_visibility="collapsed",
-            )
+    # ── Series selector panel ──────────────────────────────────────────────────
+    # 6 series: 4 per-city price series + 2 global index benchmarks.
+    # CDI and IPCA only render in Base 100 mode (no R$/m² denomination).
+    _ALL_SERIES = [
+        "Venda — Nominal",
+        "Venda — Real",
+        "Aluguel — Nominal",
+        "Aluguel — Real",
+        "CDI",
+        "IPCA",
+    ]
+    _DEFAULT_SERIES = ["Venda — Nominal", "IPCA"]
 
-    market = get_market_config(asset_class, market_type, rent_view=rent_view)
+    sel_key = f"{key_prefix}_series_sel"
+    if sel_key not in st.session_state:
+        st.session_state[sel_key] = _DEFAULT_SERIES[:]
+
+    _shd_col, _sall_col, _sclr_col = st.columns([2.8, 0.7, 0.5])
+    with _shd_col:
+        render_filter_heading("Séries")
+    with _sall_col:
+        if st.button("Selecionar tudo", key=f"{key_prefix}_series_all"):
+            st.session_state[sel_key] = _ALL_SERIES[:]
+    with _sclr_col:
+        if st.button("Limpar", key=f"{key_prefix}_series_clr"):
+            st.session_state[sel_key] = []
+
+    selected_series = st.multiselect(
+        "Séries",
+        options=_ALL_SERIES,
+        key=sel_key,
+        label_visibility="collapsed",
+    )
+
+    if not selected_series:
+        st.info("Selecione ao menos uma série para exibir.")
+        return
+
+    # ── Load and prepare data ──────────────────────────────────────────────────
     ipca_reference = get_ipca_reference()
     city_series = ensure_total_return_columns(ensure_rent_gain_columns(get_city_series(asset_class)))
-    city_series = ensure_real_series(
-        city_series,
-        nominal_col=market["price_col"],
-        real_col=market["real_col"],
-        ipca_reference=ipca_reference,
-    )
+    city_series = ensure_real_series(city_series, "sale_price_m2", "sale_price_m2_real", ipca_reference)
+    city_series = ensure_real_series(city_series, "rent_price_m2", "rent_price_m2_real", ipca_reference)
     filtered = filter_period(city_series[city_series["city"].isin(selected_cities)], *date_range)
     filtered = filtered.sort_values(["city", "date"])
     filtered = add_window_total_return_indices(filtered, group_col="city")
 
-    if market_type == "Aluguel":
-        filtered = filtered[filtered["rental_yield"].notna()].copy()
-        available_cities = sorted(filtered["city"].dropna().unique().tolist())
-        missing_cities = [city for city in selected_cities if city not in available_cities]
-        if filtered.empty:
-            st.warning("As cidades selecionadas não possuem série de rentabilidade do aluguel disponível nesse período.")
-            return
-        if missing_cities:
-            st.caption("Sem rentabilidade do aluguel para: " + ", ".join(missing_cities))
+    # ── Build plot frames ──────────────────────────────────────────────────────
+    # color_col = "{city} — Venda" or "{city} — Aluguel"
+    #   → same hue for nominal/real pair of each city+family
+    # dash_col  = "Nominal" (solid) or "Real" (dashed)
+    # rebase_key = unique per (city, family, dash) for independent Base-100 rebasing
 
-    series_visibility = ["Nominal"]
-    if market["supports_real"]:
-        line_selector_col, _ = st.columns([1.15, 2.85])
-        with line_selector_col:
-            render_filter_heading("Linhas")
-            series_visibility = st.multiselect(
-                "Linhas",
-                options=["Nominal", "Real"],
-                default=["Nominal", "Real"],
-                key=f"{key_prefix}_line_visibility",
-                label_visibility="collapsed",
-            )
-        if not series_visibility:
-            st.info("Selecione ao menos uma linha para exibir.")
-            return
+    _PRICE_MAP: dict[str, tuple[str, str, str]] = {
+        "Venda — Nominal":   ("sale_price_m2",     "Venda",   "Nominal"),
+        "Venda — Real":      ("sale_price_m2_real", "Venda",   "Real"),
+        "Aluguel — Nominal": ("rent_price_m2",      "Aluguel", "Nominal"),
+        "Aluguel — Real":    ("rent_price_m2_real", "Aluguel", "Real"),
+    }
 
-    growth = compute_growth(filtered, group_col="city", nominal_col=market["price_col"], real_col=market["real_col"])
-    plot_frames = []
+    plot_frames: list[pd.DataFrame] = []
 
-    if market["supports_real"]:
-        if "Nominal" in series_visibility:
-            nominal_df = filtered[["date", "city", market["price_col"]]].copy()
-            nominal_df["plot_value"] = nominal_df[market["price_col"]] * market["multiplier"]
-            nominal_df["line_kind"] = "Nominal"
-            nominal_df["series_key"] = nominal_df["city"] + "_nominal"
-            plot_frames.append(nominal_df[["date", "city", "line_kind", "series_key", "plot_value"]])
-        if "Real" in series_visibility:
-            real_df = filtered[["date", "city", market["real_col"]]].copy()
-            real_df["plot_value"] = real_df[market["real_col"]] * market["multiplier"]
-            real_df["line_kind"] = "Real"
-            real_df["series_key"] = real_df["city"] + "_real"
-            plot_frames.append(real_df[["date", "city", "line_kind", "series_key", "plot_value"]])
+    for label in selected_series:
+        if label not in _PRICE_MAP:
+            continue
+        col, family, dash = _PRICE_MAP[label]
+        if col not in filtered.columns:
+            continue
+        df_s = filtered[["date", "city", col]].copy().dropna(subset=[col])
+        df_s["plot_value"] = df_s[col]
+        df_s["series_label"] = df_s["city"] + " — " + family
+        df_s["dash_type"] = dash
+        df_s["rebase_key"] = df_s["city"] + " — " + family + " — " + dash
+        plot_frames.append(df_s[["date", "series_label", "dash_type", "rebase_key", "plot_value"]])
 
-        if chart_mode == "Base 100" and market_type == "Venda":
+    # Global benchmarks — only meaningful in Base 100 (no R$/m² unit)
+    _global_in_valor = [s for s in ["CDI", "IPCA"] if s in selected_series and chart_mode == "Valor"]
+    if _global_in_valor:
+        st.caption(
+            "ℹ️ "
+            + " e ".join(_global_in_valor)
+            + " não são exibidos no modo Valor (sem unidade R$/m²). "
+            "Mude para Base 100 para incluí-los."
+        )
+
+    if chart_mode == "Base 100":
+        if "CDI" in selected_series:
             cdi_ref = get_cdi_reference()
             cdi_win = filter_period(cdi_ref, *date_range)
-            if not cdi_win.empty:
-                if "Nominal" in series_visibility:
-                    tr_nom = filtered[["date", "city", "indice_total_return_window"]].copy()
-                    tr_nom["plot_value"] = tr_nom["indice_total_return_window"] * 100
-                    tr_nom["city"] = tr_nom["city"] + " + Aluguel"
-                    tr_nom["line_kind"] = "Nominal"
-                    tr_nom["series_key"] = tr_nom["city"] + "_nominal"
-                    plot_frames.append(tr_nom[["date", "city", "line_kind", "series_key", "plot_value"]])
+            if not cdi_win.empty and "cdi_index" in cdi_win.columns:
+                cdi_df = cdi_win[["date", "cdi_index"]].copy()
+                cdi_df["plot_value"] = cdi_df["cdi_index"]
+                cdi_df["series_label"] = "CDI"
+                cdi_df["dash_type"] = "Nominal"
+                cdi_df["rebase_key"] = "CDI"
+                plot_frames.append(cdi_df[["date", "series_label", "dash_type", "rebase_key", "plot_value"]])
 
-                    cdi_n = cdi_win[["date", "cdi_index"]].copy()
-                    cdi_n["plot_value"] = cdi_n["cdi_index"]
-                    cdi_n["city"] = "CDI"
-                    cdi_n["line_kind"] = "Nominal"
-                    cdi_n["series_key"] = "CDI_nominal"
-                    plot_frames.append(cdi_n[["date", "city", "line_kind", "series_key", "plot_value"]])
+        if "IPCA" in selected_series:
+            ipca_win = filter_period(ipca_reference, *date_range)
+            if not ipca_win.empty and "ipca_index" in ipca_win.columns:
+                ipca_df = ipca_win[["date", "ipca_index"]].copy()
+                ipca_df["plot_value"] = ipca_df["ipca_index"]
+                ipca_df["series_label"] = "IPCA"
+                ipca_df["dash_type"] = "Nominal"
+                ipca_df["rebase_key"] = "IPCA"
+                plot_frames.append(ipca_df[["date", "series_label", "dash_type", "rebase_key", "plot_value"]])
 
-                if "Real" in series_visibility:
-                    tr_real = filtered[["date", "city", "indice_total_return_real_window"]].copy()
-                    tr_real["plot_value"] = tr_real["indice_total_return_real_window"] * 100
-                    tr_real["city"] = tr_real["city"] + " + Aluguel"
-                    tr_real["line_kind"] = "Real"
-                    tr_real["series_key"] = tr_real["city"] + "_real"
-                    plot_frames.append(tr_real[["date", "city", "line_kind", "series_key", "plot_value"]])
+    if not plot_frames:
+        st.info("Nenhuma série disponível para as cidades e período selecionados.")
+        return
 
-                    cdi_r = cdi_win[["date", "cdi_real_index"]].copy()
-                    cdi_r["plot_value"] = cdi_r["cdi_real_index"]
-                    cdi_r["city"] = "CDI"
-                    cdi_r["line_kind"] = "Real"
-                    cdi_r["series_key"] = "CDI_real"
-                    plot_frames.append(cdi_r[["date", "city", "line_kind", "series_key", "plot_value"]])
-    else:
-        yield_df = filtered[["date", "city", market["price_col"]]].copy()
-        yield_df["plot_value"] = yield_df[market["price_col"]] * market["multiplier"]
-        yield_df["line_kind"] = "Yield"
-        yield_df["series_key"] = yield_df["city"] + "_yield"
-        plot_frames.append(yield_df[["date", "city", "line_kind", "series_key", "plot_value"]])
+    plot_df = pd.concat(plot_frames, ignore_index=True).sort_values(["rebase_key", "date"])
 
-    plot_df = pd.concat(plot_frames, ignore_index=True).sort_values(["city", "line_kind", "date"])
     if chart_mode == "Base 100":
-        plot_df = rebase_by_group(plot_df, group_col="series_key", value_col="plot_value", new_col="plot_value")
+        plot_df = rebase_by_group(
+            plot_df, group_col="rebase_key", value_col="plot_value", new_col="plot_value"
+        )
         y_title = "Base 100"
+        val_prefix, val_suffix, val_format = "", "", ",.1f"
     else:
-        y_title = market["y_title"]
+        y_title = "R$/m²"
+        val_prefix, val_suffix, val_format = "R$ ", "/m²", ",.0f"
 
-    real_positive_label = f"{(growth['real_growth_pct'] > 0).sum()} cidades com alta real"
-    if market_type == "Aluguel" and rent_view == "Yield":
-        real_positive_label = "Yield sem deflator dedicado"
+    # ── KPI Return cards (anchored to sale price) ──────────────────────────────
+    _kpi_market = {
+        "price_col": "sale_price_m2",
+        "real_col": "sale_price_m2_real",
+        "supports_real": True,
+        "multiplier": 1.0,
+    }
+    render_return_cards(filtered, _kpi_market, date_range, ipca_reference)
 
-    render_growth_kpis(
-        growth,
-        entity_col="city",
-        period_label="Período selecionado",
-        positive_label=real_positive_label,
-    )
-    render_chart_heading(market["chart_heading"])
+    # ── Unified chart ──────────────────────────────────────────────────────────
+    n_unique_labels = plot_df["series_label"].nunique()
+    render_chart_heading("Evolução das séries selecionadas")
     st.plotly_chart(
         line_chart(
             plot_df,
             value_col="plot_value",
-            color_col="city",
+            color_col="series_label",
             title="",
             y_title=y_title,
-            value_prefix=market["value_prefix"] if y_title != "Base 100" else "",
-            value_suffix=market["value_suffix"] if y_title != "Base 100" else "",
-            value_format=market["value_format"] if y_title != "Base 100" else ",.1f",
-            dash_col="line_kind" if market["supports_real"] else None,
-            dash_map={"Nominal": "solid", "Real": "dash"} if market["supports_real"] else None,
-            compact_legend=len(selected_cities) > 8,
-        ),
-        use_container_width=True,
-        config=plotly_config(),
-    )
-
-
-def render_comparisons(asset_class: str) -> None:
-    metadata = get_city_metadata(asset_class)
-    key_prefix = f"{asset_class}_compare"
-    all_cities = metadata["cities"]
-    start_default = max(metadata["min_date"], metadata["max_date"] - pd.DateOffset(years=8)).date()
-    end_default = metadata["max_date"].date()
-
-    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([1.35, 1.0, 0.85, 0.9])
-    with filter_col1:
-        render_filter_heading("Cidades")
-        selected_cities = st.multiselect(
-            "Cidades para comparar",
-            options=all_cities,
-            default=[],
-            key=f"{key_prefix}_cities",
-            label_visibility="collapsed",
-            placeholder="Escolha as cidades",
-        )
-    with filter_col2:
-        render_filter_heading("Período")
-        date_range = st.date_input(
-            "Período",
-            value=(start_default, end_default),
-            min_value=metadata["min_date"].date(),
-            max_value=metadata["max_date"].date(),
-            key=f"{key_prefix}_range",
-            label_visibility="collapsed",
-        )
-    with filter_col3:
-        render_filter_heading("Mercado")
-        market_type = st.radio(
-            "Mercado",
-            ["Venda", "Aluguel"],
-            horizontal=True,
-            key=f"{key_prefix}_market",
-            label_visibility="collapsed",
-        )
-    with filter_col4:
-        render_filter_heading("Escala")
-        chart_mode = st.radio(
-            "Escala",
-            ["Valor", "Base 100"],
-            horizontal=True,
-            key=f"{key_prefix}_mode",
-            label_visibility="collapsed",
-        )
-
-    select_all_cities = st.checkbox("Selecionar todas as cidades", key=f"{key_prefix}_all_cities")
-    if select_all_cities:
-        selected_cities = all_cities
-
-    if len(date_range) != 2 or not selected_cities:
-        st.info("Escolha as cidades que deseja comparar.")
-        return
-
-    rent_view = "Recebimento"
-    if market_type == "Aluguel":
-        metric_col, _ = st.columns([1.15, 2.85])
-        with metric_col:
-            render_filter_heading("Métrica")
-            rent_view = st.radio(
-                "Métrica de aluguel na comparação",
-                ["Yield", "Recebimento"],
-                horizontal=True,
-                key=f"{key_prefix}_rent_view",
-                label_visibility="collapsed",
-            )
-
-    market = get_market_config(asset_class, market_type, rent_view=rent_view)
-    city_series = ensure_total_return_columns(ensure_rent_gain_columns(get_city_series(asset_class)))
-    comparison_series = get_comparison_series(asset_class)
-    main_df = filter_period(city_series[city_series["city"].isin(selected_cities)], *date_range)
-    main_df = main_df.sort_values(["city", "date"])
-    main_df = add_window_total_return_indices(main_df, group_col="city")
-
-    if market_type == "Aluguel":
-        main_df = main_df[main_df["rental_yield"].notna()].copy()
-        available_cities = sorted(main_df["city"].dropna().unique().tolist())
-        missing_cities = [city for city in selected_cities if city not in available_cities]
-        if main_df.empty:
-            st.warning("As cidades selecionadas não possuem série de rentabilidade do aluguel disponível nesse período.")
-            return
-        if missing_cities:
-            st.caption("Sem rentabilidade do aluguel para: " + ", ".join(missing_cities))
-
-    metric_source = main_df.copy()
-    if chart_mode == "Base 100":
-        main_df = rebase_by_group(main_df, group_col="city", value_col=market["price_col"], new_col="plot_value")
-        y_title = "Base 100"
-        value_prefix = ""
-        value_suffix = ""
-        value_format = ",.1f"
-    else:
-        main_df["plot_value"] = main_df[market["price_col"]] * market["multiplier"]
-        y_title = market["y_title"]
-        value_prefix = market["value_prefix"]
-        value_suffix = market["value_suffix"]
-        value_format = market["value_format"]
-
-    growth = compute_growth(metric_source, group_col="city", nominal_col=market["price_col"], real_col=market["real_col"])
-    real_positive_label = f"{(growth['real_growth_pct'] > 0).sum()} cidades com alta real"
-    if market_type == "Aluguel" and rent_view == "Yield":
-        real_positive_label = "Yield sem deflator dedicado"
-
-    render_growth_kpis(
-        growth,
-        entity_col="city",
-        period_label="Período selecionado",
-        positive_label=real_positive_label,
-    )
-
-    render_chart_heading(market["chart_heading"])
-    st.plotly_chart(
-        line_chart(
-            main_df,
-            value_col="plot_value",
-            color_col="city",
-            title="",
-            y_title=y_title,
-            value_prefix=value_prefix,
-            value_suffix=value_suffix,
-            value_format=value_format,
-            compact_legend=len(selected_cities) > 8,
-        ),
-        use_container_width=True,
-        config=plotly_config(),
-    )
-
-    available_series = [series for series in market["secondary_series"] if series in comparison_series["series_name"].unique()]
-    if market_type == "Aluguel":
-        default_series = [series for series in available_series if series != "IPCA"]
-    else:
-        default_series = [series for series in [market["composite_series"], "IVG-R", "IGMI-R Brasil", "MVG-R"] if series in available_series]
-
-    render_filter_heading("Séries")
-    selected_series = st.multiselect(
-        "Séries secundárias",
-        options=available_series,
-        default=default_series,
-        key=f"{key_prefix}_secondary_series",
-        label_visibility="collapsed",
-    )
-
-    secondary_df = filter_period(
-        comparison_series[comparison_series["series_name"].isin(sorted(set(selected_series + ["IPCA"])))],
-        *date_range,
-    )
-    secondary_df = secondary_df.sort_values(["series_name", "date"])
-    secondary_df = rebase_by_group(secondary_df, group_col="series_name", value_col="value", new_col="rebased_value")
-
-    render_chart_heading("Índices selecionados vs IPCA")
-    st.plotly_chart(
-        comparison_chart(
-            secondary_df,
-            title="",
-            y_title="Base 100 no início da janela",
-            compact_legend=len(selected_series) > 8,
+            value_prefix=val_prefix,
+            value_suffix=val_suffix,
+            value_format=val_format,
+            dash_col="dash_type",
+            dash_map={"Nominal": "solid", "Real": "dash"},
+            compact_legend=n_unique_labels > 8,
         ),
         use_container_width=True,
         config=plotly_config(),
@@ -834,13 +828,6 @@ def render_neighborhoods() -> None:
     summary_table["Último nominal"] = summary_table["Último nominal"].map(format_currency)
     summary_table["Último real"] = summary_table["Último real"].map(format_currency)
     summary_table["Alta real"] = summary_table["Alta real"].map(format_pct)
-
-    render_growth_kpis(
-        growth,
-        entity_col="label",
-        period_label="Período selecionado",
-        positive_label=f"{(growth['real_growth_pct'] > 0).sum()} bairros com alta real",
-    )
 
     active_df = nominal_base_df if chart_variant == "Nominal" else real_base_df
     render_chart_heading(f"Preço {chart_variant.lower()} do m² por bairro")
@@ -942,21 +929,17 @@ def render_asset_dashboard(asset_class: str) -> None:
         return
 
     if asset["show_neighborhoods"]:
-        tab_panorama, tab_compare, tab_neighborhood, tab_data = st.tabs(["Panorama", "Comparações", "m² por Bairro", "Dados"])
+        tab_panorama, tab_neighborhood, tab_data = st.tabs(["Panorama", "m² por Bairro", "Dados"])
         with tab_panorama:
             render_panorama(asset_class)
-        with tab_compare:
-            render_comparisons(asset_class)
         with tab_neighborhood:
             render_neighborhoods()
         with tab_data:
             render_data_tab(asset_class)
     else:
-        tab_panorama, tab_compare, tab_data = st.tabs(["Panorama", "Comparações", "Dados"])
+        tab_panorama, tab_data = st.tabs(["Panorama", "Dados"])
         with tab_panorama:
             render_panorama(asset_class)
-        with tab_compare:
-            render_comparisons(asset_class)
         with tab_data:
             render_data_tab(asset_class)
 

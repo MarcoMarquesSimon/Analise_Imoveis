@@ -6,7 +6,12 @@
       "Bash(dir .cache\\\\macro_series_v2.pkl)",
       "Bash(Remove-Item \"C:\\\\Users\\\\usuar\\\\Downloads\\\\Programming\\\\Analise_Imoveis_Brasil-Codex\\\\.cache\\\\macro_series_v2.pkl\" -ErrorAction SilentlyContinue)",
       "Bash(Test-Path \"C:\\\\Users\\\\usuar\\\\Downloads\\\\Programming\\\\Analise_Imoveis_Brasil-Codex\\\\.cache\\\\macro_series_v2.pkl\")",
-      "Bash(python -m streamlit run app.py --server.headless true --server.port 8501)"
+      "Bash(python -m streamlit run app.py --server.headless true --server.port 8501)",
+      "Bash(python -c \"import ast, sys; ast.parse\\(open\\('app.py'\\).read\\(\\)\\); print\\('OK - syntax valid'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK - syntax valid'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('app.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('dashboard/data.py', encoding='utf-8'\\).read\\(\\)\\); print\\('data.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }
