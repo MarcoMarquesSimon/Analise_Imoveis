@@ -380,6 +380,7 @@ def render_return_cards(
     market: dict,
     date_range: tuple,
     ipca_reference: pd.DataFrame,
+    rental_income_pct: float | None = None,
 ) -> None:
     st.markdown(_RETURN_CARDS_CSS, unsafe_allow_html=True)
 
@@ -401,6 +402,11 @@ def render_return_cards(
     if nom_total is not None:
         nom_ann = _rc_annualize(nom_total, n_months)
         cls = "pos" if nom_total >= 0 else "neg"
+        _income_line = ""
+        if rental_income_pct is not None:
+            _income_line = (
+                f'<div class="rc-ann">do qual {_rc_fmt(rental_income_pct)} pp de renda de aluguel</div>'
+            )
         c1 = (
             f'<div class="rc {cls}">'
             '<div class="rc-header">'
@@ -409,6 +415,7 @@ def render_return_cards(
             "</div>"
             f'<div class="rc-sub">{n_months} meses</div>'
             f'<div class="rc-ann">{_rc_fmt(nom_ann)} a.a.</div>'
+            f'{_income_line}'
             "</div>"
         )
     else:
@@ -578,7 +585,7 @@ def render_panorama(asset_class: str) -> None:
         render_filter_heading("Escala")
         chart_mode = st.radio(
             "Escala",
-            ["Valor", "Base 100"],
+            ["Base 100", "Valor"],
             horizontal=True,
             key=f"{key_prefix}_mode",
             label_visibility="collapsed",
@@ -589,17 +596,21 @@ def render_panorama(asset_class: str) -> None:
         return
 
     # ── Series selector panel ──────────────────────────────────────────────────
-    # 6 series: 4 per-city price series + 2 global index benchmarks.
+    # 8 series: 4 per-city price series + 2 total-return series + 2 global benchmarks.
     # CDI and IPCA only render in Base 100 mode (no R$/m² denomination).
+    # Imóvel + Aluguel: cumulative total return (capital gain + rental income),
+    # uses indice_total_return_window scaled to R$/m² in Valor mode.
     _ALL_SERIES = [
         "Venda — Nominal",
         "Venda — Real",
+        "Imóvel + Aluguel — Nominal",
+        "Imóvel + Aluguel — Real",
         "Aluguel — Nominal",
         "Aluguel — Real",
         "CDI",
         "IPCA",
     ]
-    _DEFAULT_SERIES = ["Venda — Nominal", "IPCA"]
+    _DEFAULT_SERIES = ["Venda — Nominal", "Imóvel + Aluguel — Nominal", "IPCA"]
 
     sel_key = f"{key_prefix}_series_sel"
     if sel_key not in st.session_state:
@@ -636,7 +647,7 @@ def render_panorama(asset_class: str) -> None:
     filtered = add_window_total_return_indices(filtered, group_col="city")
 
     # ── Build plot frames ──────────────────────────────────────────────────────
-    # color_col = "{city} — Venda" or "{city} — Aluguel"
+    # color_col = "{city} — Venda" / "{city} — Imóvel + Aluguel" / "{city} — Aluguel"
     #   → same hue for nominal/real pair of each city+family
     # dash_col  = "Nominal" (solid) or "Real" (dashed)
     # rebase_key = unique per (city, family, dash) for independent Base-100 rebasing
@@ -662,6 +673,63 @@ def render_panorama(asset_class: str) -> None:
         df_s["dash_type"] = dash
         df_s["rebase_key"] = df_s["city"] + " — " + family + " — " + dash
         plot_frames.append(df_s[["date", "series_label", "dash_type", "rebase_key", "plot_value"]])
+
+    # ── Imóvel + Aluguel: cumulative total return (capital gain + rental income) ──
+    # Source: indice_total_return_window / indice_total_return_real_window
+    #   (pre-computed by add_window_total_return_indices from retorno_total_pct,
+    #    which compounds capital return + monthly rental_yield at each month).
+    # Valor mode: scaled to R$/m² starting at the same initial sale price as Venda.
+    # Base 100 mode: rebase_by_group normalises each series independently to 100.
+    # Edge case: missing rental_yield is zero-filled (conservative, no error thrown).
+    _ia_nom_sel = "Imóvel + Aluguel — Nominal" in selected_series
+    _ia_real_sel = "Imóvel + Aluguel — Real" in selected_series
+
+    if _ia_nom_sel or _ia_real_sel:
+        _tr_cols = ["date", "city", "sale_price_m2", "sale_price_m2_real",
+                    "indice_total_return_window", "indice_total_return_real_window"]
+        _tr = filtered[[c for c in _tr_cols if c in filtered.columns]].copy()
+        _tr = _tr.sort_values(["city", "date"])
+        _tr["_init_nom_idx"] = _tr.groupby("city")["indice_total_return_window"].transform("first")
+        _tr["_init_real_idx"] = _tr.groupby("city")["indice_total_return_real_window"].transform("first")
+        _tr["_init_px_nom"] = _tr.groupby("city")["sale_price_m2"].transform("first")
+        _tr["_init_px_real"] = _tr.groupby("city")["sale_price_m2_real"].transform("first")
+
+        if _ia_nom_sel:
+            tr_nom = _tr.copy()
+            tr_nom["plot_value"] = (
+                tr_nom["indice_total_return_window"]
+                / tr_nom["_init_nom_idx"].replace(0, 1.0)
+                * tr_nom["_init_px_nom"]
+            )
+            tr_nom["series_label"] = tr_nom["city"] + " — Imóvel + Aluguel"
+            tr_nom["dash_type"] = "Nominal"
+            tr_nom["rebase_key"] = tr_nom["city"] + " — Imóvel + Aluguel — Nominal"
+            plot_frames.append(tr_nom[["date", "series_label", "dash_type", "rebase_key", "plot_value"]])
+
+        if _ia_real_sel:
+            tr_real = _tr.copy()
+            tr_real["plot_value"] = (
+                tr_real["indice_total_return_real_window"]
+                / tr_real["_init_real_idx"].replace(0, 1.0)
+                * tr_real["_init_px_real"]
+            )
+            tr_real["series_label"] = tr_real["city"] + " — Imóvel + Aluguel"
+            tr_real["dash_type"] = "Real"
+            tr_real["rebase_key"] = tr_real["city"] + " — Imóvel + Aluguel — Real"
+            plot_frames.append(tr_real[["date", "series_label", "dash_type", "rebase_key", "plot_value"]])
+
+        # Footnote for cities with no rental_yield data in the selected window
+        _cities_no_yield = [
+            city
+            for city, sub in filtered.groupby("city")
+            if "rental_yield" not in sub.columns or sub["rental_yield"].isna().all()
+        ]
+        if _cities_no_yield:
+            st.caption(
+                "¹ Yield de aluguel indisponível para o período em: "
+                + ", ".join(_cities_no_yield)
+                + ". Imóvel + Aluguel reflete apenas valorização do imóvel."
+            )
 
     # Global benchmarks — only meaningful in Base 100 (no R$/m² unit)
     _global_in_valor = [s for s in ["CDI", "IPCA"] if s in selected_series and chart_mode == "Valor"]
@@ -711,14 +779,38 @@ def render_panorama(asset_class: str) -> None:
         y_title = "R$/m²"
         val_prefix, val_suffix, val_format = "R$ ", "/m²", ",.0f"
 
-    # ── KPI Return cards (anchored to sale price) ──────────────────────────────
-    _kpi_market = {
-        "price_col": "sale_price_m2",
-        "real_col": "sale_price_m2_real",
-        "supports_real": True,
-        "multiplier": 1.0,
-    }
-    render_return_cards(filtered, _kpi_market, date_range, ipca_reference)
+    # ── KPI Return cards ───────────────────────────────────────────────────────
+    # When "Imóvel + Aluguel — Nominal" is selected, the Retorno Nominal KPI
+    # reflects the total return (capital + income). A secondary line shows
+    # how many pp came from rental income vs pure capital appreciation.
+    _tr_nom_kpi = "Imóvel + Aluguel — Nominal" in selected_series
+    _tr_real_kpi = "Imóvel + Aluguel — Real" in selected_series
+
+    if _tr_nom_kpi:
+        _kpi_market = {
+            "price_col": "indice_total_return_window",
+            "real_col": "indice_total_return_real_window",
+            "supports_real": _tr_real_kpi,
+            "multiplier": 1.0,
+        }
+        # Rental income contribution ≈ total_return − capital_only (pp, approximate)
+        _tot_ret = _rc_total_return(filtered, "indice_total_return_window")
+        _cap_ret = _rc_total_return(filtered, "sale_price_m2")
+        _rental_income_pct = (
+            _tot_ret - _cap_ret
+            if _tot_ret is not None and _cap_ret is not None
+            else None
+        )
+    else:
+        _kpi_market = {
+            "price_col": "sale_price_m2",
+            "real_col": "sale_price_m2_real",
+            "supports_real": True,
+            "multiplier": 1.0,
+        }
+        _rental_income_pct = None
+
+    render_return_cards(filtered, _kpi_market, date_range, ipca_reference, rental_income_pct=_rental_income_pct)
 
     # ── Unified chart ──────────────────────────────────────────────────────────
     n_unique_labels = plot_df["series_label"].nunique()

@@ -11,7 +11,18 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK - syntax valid'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('app.py OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('dashboard/data.py', encoding='utf-8'\\).read\\(\\)\\); print\\('data.py OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/test_total_return.py -v)",
+      "Bash(python -m pytest tests/test_total_return.py -v)",
+      "Bash(python3 -m pytest tests/test_total_return.py -v)",
+      "Bash(cmd /c \".venv\\\\Scripts\\\\python.exe -m pytest tests\\\\test_total_return.py -v 2>&1\")",
+      "Bash(where python *)",
+      "Bash(python -c \"import pandas, pytest; print\\('pandas and pytest both available'\\)\")",
+      "Bash(py -3 -c \"import pandas, pytest; print\\('OK'\\)\")",
+      "Bash(py -3 -m pytest \"C:\\\\Users\\\\usuar\\\\Downloads\\\\Programming\\\\Analise_Imoveis_Brasil-Codex\\\\tests\\\\test_total_return.py\" -v)",
+      "Bash(pip show *)",
+      "Bash(\"C:\\\\Users\\\\usuar\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\" -m pip install pytest -q)",
+      "Bash(\"C:\\\\Users\\\\usuar\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe\" -m pytest \"C:\\\\Users\\\\usuar\\\\Downloads\\\\Programming\\\\Analise_Imoveis_Brasil-Codex\\\\tests\\\\test_total_return.py\" -v)"
     ]
   }
 }
